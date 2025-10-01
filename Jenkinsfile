@@ -14,7 +14,7 @@ pipeline {
     stages {
         stage('Checkout Git') {
             steps {
-                git url: 'https://github.com/Hadilsa/application-pfe.git', branch: 'main'  // fixed typo
+                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'  // fixed typo
             }
         }
 
