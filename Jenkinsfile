@@ -1,148 +1,182 @@
 pipeline {
     agent any
-    
+
     tools {
         jdk 'jdk17'
-        maven 'maven3'
+        maven 'M2_HOME'
     }
 
     environment {
-        SCANNER_HOME= tool 'sonar-scanner'
+        IMAGE_NAME = 'hadilsae/hadilpfe'   // Docker Hub repo
+        IMAGE_TAG = 'latest'                // Image tag
     }
 
     stages {
-        stage('Git Checkout') {
+        stage('Checkout Git') {
             steps {
-               git branch: 'main', credentialsId: 'git-cred', url: 'https://github.com/ganeshperumal007/Boardgame.git'
+                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'
             }
         }
-        
+
+        stage('Maven Clean') {
+            steps {
+                sh 'mvn clean'
+            }
+        }
+
         stage('Compile') {
             steps {
-                sh "mvn compile"
+                sh 'mvn compile'
             }
         }
-        
-        stage('Test') {
+
+        stage('Unit Tests') {
             steps {
-                sh "mvn test"
+                sh 'mvn test'
             }
         }
-        
-        stage('File System Scan') {
+
+        stage('File System Scan (Trivy)') {
             steps {
-                sh "trivy fs --format table -o trivy-fs-report.html ."
+                sh 'trivy fs --format table -o trivy-fs-report.html .'
             }
         }
-        
-        stage('SonarQube Analsyis') {
+
+        stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=BoardGame -Dsonar.projectKey=BoardGame \
-                            -Dsonar.java.binaries=. '''
+                    sh '''
+                    mvn sonar:sonar \
+                        -Dsonar.projectKey=BoardGame \
+                        -Dsonar.projectName=BoardGame \
+                        -Dsonar.login=admin \
+                        -Dsonar.password=0000
+                    '''
                 }
             }
         }
-        
-        stage('Quality Gate') {
+
+        stage('SonarQube Quality Gate') {
             steps {
                 script {
-                  waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonarqube_key2'
                 }
             }
         }
-        
-        stage('Build') {
-            steps {
-               sh "mvn package"
-            }
-        }
-        
-        stage('Publish To Nexus') {
-            steps {
-               withMaven(globalMavenSettingsConfig: 'global-settings', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                    sh "mvn deploy"
-                }
-            }
-        }
-        
-        stage('Build & Tag Docker Image') {
-            steps {
-               script {
-                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
-                            sh "docker build -t ganeshperumal007/boardshack:latest ."
-                    }
-               }
-            }
-        }
-        
-        stage('Docker Image Scan') {
-            steps {
-                sh "trivy image --format table -o trivy-image-report.html ganeshperumal007/boardshack:latest "
-            }
-        }
-        
-        stage('Push Docker Image') {
-            steps {
-               script {
-                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
-                            sh "docker push ganeshperumal007/boardshack:latest"
-                    }
-               }
-            }
-        }
-        stage('Deploy To Kubernetes') {
-            steps {
-               withKubeConfig(caCertificate: '', clusterName: 'kubernetes', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://172.31.0.56:6443') {
-                        sh "kubectl apply -f deployment-service.yaml"
-                }
-            }
-        }
-        
-        stage('Verify the Deployment') {
-            steps {
-               withKubeConfig(caCertificate: '', clusterName: 'kubernetes', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://172.31.0.56:6443') {
-                        sh "kubectl get pods -n webapps"
-                        sh "kubectl get svc -n webapps"
-                }
-            }
-        }
-        
-        
-    }
-    post {
-    always {
-        script {
-            def jobName = env.JOB_NAME
-            def buildNumber = env.BUILD_NUMBER
-            def pipelineStatus = currentBuild.result ?: 'UNKNOWN'
-            def bannerColor = pipelineStatus.toUpperCase() == 'SUCCESS' ? 'green' : 'red'
 
-            def body = """
+        stage('Build (Maven Package)') {
+            steps {
+                sh 'mvn package -Dmaven.test.skip=true -P test-coverage'
+            }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                withMaven(
+                    globalMavenSettingsConfig: 'global-settings',
+                    jdk: 'jdk17',
+                    maven: 'M2_HOME',
+                    mavenSettingsConfig: '',
+                    traceability: true
+                ) {
+                    sh 'mvn deploy'
+                }
+            }
+        }
+
+        
+         stage('Build & Tag Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                            sh "docker build -t docker push hadilsae/hadilpfe:tagname ."
+                    }
+               }
+            }
+        }
+
+        stage('Docker Image Scan (Trivy)') {
+            steps {
+                sh "trivy image --format table -o trivy-image-report.html ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+                
+         stage('Build & Tag Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                            sh "docker push -t docker push hadilsae/hadilpfe:tagname ."
+                    }
+               }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withKubeConfig(
+                    credentialsId: 'k8-cred',
+                    clusterName: 'kubernetes',
+                    namespace: 'webapps',
+                    serverUrl: 'https://192.168.1.18:6443'
+                ) {
+                    sh 'kubectl apply -f deployment-service.yaml'
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                withKubeConfig(
+                    credentialsId: 'k8-cred',
+                    clusterName: 'kubernetes',
+                    namespace: 'webapps',
+                    serverUrl: 'https://192.168.1.18:6443'
+                ) {
+                    sh 'kubectl get pods -n webapps'
+                    sh 'kubectl get svc -n webapps'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def jobName = env.JOB_NAME
+                def buildNumber = env.BUILD_NUMBER
+                def pipelineStatus = currentBuild.result ?: 'UNKNOWN'
+                def bannerColor = pipelineStatus.toUpperCase() == 'SUCCESS' ? 'green' : 'red'
+
+                def body = """
                 <html>
                 <body>
-                <div style="border: 4px solid ${bannerColor}; padding: 10px;">
-                <h2>${jobName} - Build ${buildNumber}</h2>
-                <div style="background-color: ${bannerColor}; padding: 10px;">
-                <h3 style="color: white;">Pipeline Status: ${pipelineStatus.toUpperCase()}</h3>
-                </div>
-                <p>Check the <a href="${BUILD_URL}">console output</a>.</p>
-                </div>
+                    <div style="border: 4px solid ${bannerColor}; padding: 10px;">
+                        <h3 style="color: ${bannerColor};">${pipelineStatus.toUpperCase()}</h3>
+                    </div>
+                    <h2>${jobName} - Build ${buildNumber}</h2>
+                    <div style="background-color: ${bannerColor}; padding: 10px;">
+                        <h3 style="color: white;">Pipeline Status</h3>
+                        <p>Check the <a href="${BUILD_URL}">console output</a>.</p>
+                    </div>
                 </body>
                 </html>
-            """
+                """
 
-            emailext (
-                subject: "${jobName} - Build ${buildNumber} - ${pipelineStatus.toUpperCase()}",
-                body: body,
-                to: 'ganeshperumal882000@gmail.com',
-                from: 'jenkins@example.com',
-                replyTo: 'jenkins@example.com',
-                mimeType: 'text/html',
-                attachmentsPattern: 'trivy-image-report.html'
-            )
+                emailext(
+                    subject: "${jobName} - Build ${buildNumber} ${pipelineStatus.toUpperCase()}",
+                    body: body,
+                    to: 'hadil.saidi16@gmail.com',
+                    from: 'jenkins@example.com',
+                    replyTo: 'jenkins@example.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: 'trivy-image-report.html'
+                )
+            }
+        }
+
+        failure {
+            echo '❌ Pipeline failed!'
         }
     }
-}
-
 }
