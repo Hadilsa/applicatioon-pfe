@@ -3,7 +3,7 @@ pipeline {
 
     tools {
         jdk 'jdk17'
-        maven 'Maven'  // Make sure this matches your Jenkins Maven tool name
+        maven 'M2_HOME'  // Make sure this matches your Jenkins Maven tool name
     }
 
     environment {
@@ -75,7 +75,7 @@ mvn sonar:sonar \
                 withMaven(
                     globalMavenSettingsConfig: 'global-settings',
                     jdk: 'jdk17',
-                    maven: 'Maven',
+                    maven: 'M2_HOME',
                     mavenSettingsConfig: '',
                     traceability: true
                 ) {
