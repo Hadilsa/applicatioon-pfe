@@ -66,7 +66,7 @@ mvn sonar:sonar \
 
         stage('Build (Maven Package)') {
             steps {
-                sh 'mvn package -Dmaven.test.skip=true -P test-coverage'
+                sh 'mvn clean verify -P test-coverage'
             }
         }
 
