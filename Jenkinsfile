@@ -83,12 +83,12 @@ pipeline {
             }
         }
 
-        stage('Publish to Nexus') {
+        stage('Déploiement Nexus') {
             steps {
                 withMaven(
-                    maven: 'M2_HOME',
+                    globalMavenSettingsConfig: 'global-settings', // ID you defined
                     jdk: 'jdk17',
-                    globalMavenSettingsConfig: 'global-settings'
+                    maven: 'M2_HOME'
                 ) {
                     sh 'mvn deploy -DskipTests'
                 }
