@@ -1,22 +1,115 @@
 pipeline {
     agent any
 
+    tools {
+        jdk 'jdk17'
+        maven 'M2_HOME'  // Ensure this matches your configured Maven tool name
+    }
+
     environment {
         IMAGE_NAME = 'hadilsae/hadilpfe'
         IMAGE_TAG = 'latest'
-        TRIVY_CACHE_DIR = '/var/lib/jenkins/.cache/trivy'
+        TRIVY_CACHE_DIR = '/var/lib/jenkins/.cache/trivy'  // Set this to your cache location
     }
 
     stages {
+        stage('Checkout Git') {
+            steps {
+                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'
+            }
+        }
+
+        stage('Maven Clean') {
+            steps {
+                sh 'mvn clean'
+            }
+        }
+
+        stage('Compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('File System Scan (Trivy)') {
+            steps {
+                sh 'trivy fs --format table -o trivy-fs-report.html .'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh '''
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=BoardGame \
+                        -Dsonar.projectName=BoardGame \
+                        -Dsonar.login=admin \
+                        -Dsonar.password=0000
+                    '''.stripIndent()
+                }
+            }
+        }
+
+        stage('SonarQube Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonarqube_key2'
+                }
+            }
+        }
+
+        stage('Update Maven Version') {
+            steps {
+                script {
+                    def newVersion = "0.0.${env.BUILD_NUMBER}"
+                    echo "Setting Maven version to ${newVersion}"
+                    sh "mvn versions:set -DnewVersion=${newVersion} -DgenerateBackupPoms=false"
+                }
+            }
+        }
+
+        stage('Build (Maven Package)') {
+            steps {
+                sh 'mvn clean verify -P test-coverage'
+            }
+        }
+
+        stage('Publish JaCoCo Report') {
+            steps {
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'target/site/jacoco',
+                    reportFiles: 'index.html',
+                    reportName: 'JaCoCo Code Coverage Report'
+                ])
+            }
+        }
+
+        stage('Déploiement Nexus') {
+            steps {
+                withMaven(
+                    globalMavenSettingsConfig: 'global-settings',
+                    jdk: 'jdk17',
+                    maven: 'M2_HOME'
+                ) {
+                    sh 'mvn deploy -DskipTests'
+                }
+            }
+        }
+
         stage('Build & Push Docker Image') {
             steps {
                 script {
-                    // Check docker client version
-                    sh 'docker version'
-
-                    // Login and push to Docker Hub
-                    withDockerRegistry(credentialsId: 'docker-cred') {
-                        sh 'docker info'
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
                         sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
                         sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                     }
@@ -37,14 +130,75 @@ pipeline {
                 archiveArtifacts artifacts: 'trivy-image-report.html', allowEmptyArchive: false
             }
         }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withKubeConfig(
+                    credentialsId: 'k8-cred',
+                    clusterName: 'kubernetes',
+                    namespace: 'webapps',
+                    serverUrl: 'https://192.168.1.18:6443'
+                ) {
+                    sh 'kubectl apply -f deployment-service.yaml'
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                withKubeConfig(
+                    credentialsId: 'k8-cred',
+                    clusterName: 'kubernetes',
+                    namespace: 'webapps',
+                    serverUrl: 'https://192.168.1.18:6443'
+                ) {
+                    sh 'kubectl get pods -n webapps'
+                    sh 'kubectl get svc -n webapps'
+                }
+            }
+        }
     }
 
     post {
-        success {
-            echo '✅ Pipeline completed successfully!'
+        always {
+            script {
+                def jobName = env.JOB_NAME
+                def buildNumber = env.BUILD_NUMBER
+                def pipelineStatus = currentBuild.result ?: 'SUCCESS'
+                def bannerColor = pipelineStatus.toUpperCase() == 'SUCCESS' ? 'green' : 'red'
+
+                def body = """
+<html>
+<body>
+    <div style="border: 4px solid ${bannerColor}; padding: 10px;">
+        <h3 style="color: ${bannerColor};">${pipelineStatus.toUpperCase()}</h3>
+    </div>
+    <h2>${jobName} - Build ${buildNumber}</h2>
+    <div style="background-color: ${bannerColor}; padding: 10px;">
+        <h3 style="color: white;">Pipeline Status</h3>
+        <p>Check the <a href="${BUILD_URL}">console output</a>.</p>
+        <p>Trivy report attached for details.</p>
+    </div>
+</body>
+</html>
+                """
+
+                emailext(
+                    subject: "${jobName} - Build ${buildNumber} ${pipelineStatus.toUpperCase()}",
+                    body: body,
+                    to: 'hadil.saidi16@gmail.com',
+                    from: 'jenkins@example.com',
+                    replyTo: 'jenkins@example.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: 'trivy-image-report.html'
+                )
+
+                archiveArtifacts 'target/site/jacoco/**'
+            }
         }
+
         failure {
-            echo '❌ Pipeline failed.'
+            echo '❌ Pipeline failed!'
         }
     }
 }
