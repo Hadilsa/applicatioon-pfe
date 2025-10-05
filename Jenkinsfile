@@ -2,27 +2,29 @@ pipeline {
     agent any
 
     environment {
-        KUBE_NAMESPACE = 'webapps'
-        KUBE_SERVER_URL = 'https://192.168.1.18:6443'
-        DEPLOYMENT_FILE = 'deployment-service.yaml'
+        // Optional: You can define global env variables here
+        KUBECONFIG_CREDENTIALS_ID = 'k8-cred'
+        K8S_CLUSTER = 'kubernetes'
+        K8S_NAMESPACE = 'webapps'
+        K8S_SERVER = 'https://192.168.1.18:6443'
     }
 
     stages {
-        stage('Checkout Git') {
+        stage('Checkout') {
             steps {
-                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'
+                checkout scm
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
                 withKubeConfig(
-                    credentialsId: 'k8-cred',
-                    clusterName: 'kubernetes',
-                    namespace: "${KUBE_NAMESPACE}",
-                    serverUrl: "${KUBE_SERVER_URL}"
+                    credentialsId: "${env.KUBECONFIG_CREDENTIALS_ID}",
+                    clusterName: "${env.K8S_CLUSTER}",
+                    namespace: "${env.K8S_NAMESPACE}",
+                    serverUrl: "${env.K8S_SERVER}"
                 ) {
-                    sh "kubectl apply -f ${DEPLOYMENT_FILE} -n ${KUBE_NAMESPACE}"
+                    sh 'kubectl apply -f deployment-service.yaml -n ${K8S_NAMESPACE}'
                 }
             }
         }
@@ -30,24 +32,24 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 withKubeConfig(
-                    credentialsId: 'k8-cred',
-                    clusterName: 'kubernetes',
-                    namespace: "${KUBE_NAMESPACE}",
-                    serverUrl: "${KUBE_SERVER_URL}"
+                    credentialsId: "${env.KUBECONFIG_CREDENTIALS_ID}",
+                    clusterName: "${env.K8S_CLUSTER}",
+                    namespace: "${env.K8S_NAMESPACE}",
+                    serverUrl: "${env.K8S_SERVER}"
                 ) {
-                    sh "kubectl get pods -n ${KUBE_NAMESPACE}"
-                    sh "kubectl get svc -n ${KUBE_NAMESPACE}"
+                    sh 'kubectl get pods -n ${K8S_NAMESPACE}'
+                    sh 'kubectl get svc -n ${K8S_NAMESPACE}'
                 }
             }
         }
     }
 
     post {
-        failure {
-            echo '❌ Deployment pipeline failed!'
-        }
         success {
-            echo '✅ Deployment pipeline succeeded!'
+            echo '✅ Deployment successful!'
+        }
+        failure {
+            echo '❌ Deployment failed!'
         }
     }
 }
