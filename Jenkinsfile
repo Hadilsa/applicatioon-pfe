@@ -64,6 +64,17 @@ pipeline {
             }
         }
 
+        stage('Update Maven Version') {
+            steps {
+                script {
+                    // Define new version with Jenkins build number
+                    def newVersion = "0.0.${env.BUILD_NUMBER}"
+                    echo "Setting Maven version to ${newVersion}"
+                    sh "mvn versions:set -DnewVersion=${newVersion} -DgenerateBackupPoms=false"
+                }
+            }
+        }
+
         stage('Build (Maven Package)') {
             steps {
                 sh 'mvn clean verify -P test-coverage'
