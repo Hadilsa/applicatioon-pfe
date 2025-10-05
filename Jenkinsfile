@@ -3,7 +3,7 @@ pipeline {
 
     tools {
         jdk 'jdk17'
-        maven 'M2_HOME'  // Make sure this matches your Jenkins Maven tool name
+        maven 'M2_HOME'  // Make sure this exactly matches your Maven tool name in Jenkins Global Tool Configuration
     }
 
     environment {
@@ -14,7 +14,7 @@ pipeline {
     stages {
         stage('Checkout Git') {
             steps {
-                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'  // fixed typo
+                git url: 'https://github.com/Hadilsa/applicatioon-pfe.git', branch: 'main'
             }
         }
 
@@ -46,11 +46,11 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonar') {
                     sh '''
-mvn sonar:sonar \
--Dsonar.projectKey=BoardGame \
--Dsonar.projectName=BoardGame \
--Dsonar.login=admin \
--Dsonar.password=0000
+                    mvn sonar:sonar \
+                    -Dsonar.projectKey=BoardGame \
+                    -Dsonar.projectName=BoardGame \
+                    -Dsonar.login=admin \
+                    -Dsonar.password=0000
                     '''.stripIndent()
                 }
             }
@@ -85,11 +85,13 @@ mvn sonar:sonar \
 
         stage('Publish to Nexus') {
             steps {
+                script {
+                    echo "Using Maven tool M2_HOME and JDK jdk17"
+                }
                 withMaven(
-                    globalMavenSettingsConfig: 'global-settings',
+                    globalMavenSettingsConfig: 'global-settings',  // confirm this config exists
                     jdk: 'jdk17',
                     maven: 'M2_HOME',
-                    mavenSettingsConfig: '',
                     traceability: true
                 ) {
                     sh 'mvn deploy'
@@ -175,7 +177,6 @@ mvn sonar:sonar \
                     attachmentsPattern: 'trivy-image-report.html'
                 )
 
-                // Archive JaCoCo reports so you can download them
                 archiveArtifacts 'target/site/jacoco/**'
             }
         }
