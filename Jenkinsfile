@@ -70,6 +70,19 @@ mvn sonar:sonar \
             }
         }
 
+        stage('Publish JaCoCo Report') {
+            steps {
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'target/site/jacoco',
+                    reportFiles: 'index.html',
+                    reportName: 'JaCoCo Code Coverage Report'
+                ])
+            }
+        }
+
         stage('Publish to Nexus') {
             steps {
                 withMaven(
@@ -161,6 +174,9 @@ mvn sonar:sonar \
                     mimeType: 'text/html',
                     attachmentsPattern: 'trivy-image-report.html'
                 )
+
+                // Archive JaCoCo reports so you can download them
+                archiveArtifacts 'target/site/jacoco/**'
             }
         }
 
