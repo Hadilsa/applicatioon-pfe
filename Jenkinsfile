@@ -27,5 +27,11 @@ pipeline {
                 }
             }
         }
+
+        stage('Docker Image Scan (Trivy)') {
+            steps {
+                sh "trivy image --format table -o trivy-image-report.html ${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
     }
 }
