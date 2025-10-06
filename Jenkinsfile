@@ -19,17 +19,18 @@ pipeline {
         stage('Run Kubeaudit Scan') {
             steps {
                 script {
-                    // Ensure kubeaudit is installed on the Jenkins agent/worker
-
-                    // Run kubeaudit to check the Kubernetes manifests
+                    // Ensure the kubeconfig file path is properly passed to kubeaudit
                     withKubeConfig(
                         credentialsId: "${env.KUBECONFIG_CREDENTIALS_ID}",
                         clusterName: "${env.K8S_CLUSTER}",
                         namespace: "${env.K8S_NAMESPACE}",
                         serverUrl: "${env.K8S_SERVER}"
                     ) {
-                        // Run the kubeaudit scan, check all resources (pods, deployments, services, etc.)
-                        sh "kubeaudit all --kubeconfig ${KUBECONFIG_CREDENTIALS_ID} --namespace ${env.K8S_NAMESPACE} --format pretty"
+                        // Set the KUBECONFIG environment variable for the current shell session
+                        withEnv(["KUBECONFIG=${env.KUBECONFIG_CREDENTIALS_ID}"]) {
+                            // Run the kubeaudit scan, check all resources (pods, deployments, services, etc.)
+                            sh "kubeaudit all --kubeconfig ${KUBECONFIG} --namespace ${env.K8S_NAMESPACE} --format pretty"
+                        }
                     }
                 }
             }
@@ -44,19 +45,6 @@ pipeline {
     }
 
     post {
-        always {
-            // Send email or perform other actions after scan
-            emailext(
-                subject: "Kubeaudit Scan Report - Build ${env.BUILD_NUMBER}",
-                body: "The Kubeaudit scan has completed for this build. Please review the attached report.",
-                to: 'your-email@example.com',  // Adjust the recipient as needed
-                from: 'jenkins@example.com',
-                replyTo: 'jenkins@example.com',
-                mimeType: 'text/html',
-                attachmentsPattern: 'kubeaudit-report.txt'  // Ensure this file path matches your generated report
-            )
-        }
-
         failure {
             echo '❌ Kubeaudit Scan failed!'
         }
