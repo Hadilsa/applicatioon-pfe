@@ -2,17 +2,14 @@ pipeline {
     agent any
     
     environment {
-        K8S_CLUSTER = 'kubernetes'
         K8S_NAMESPACE = 'webapps'
-        K8S_SERVER = 'https://192.168.1.18:6443'
-        KUBEAUDIT_VERSION = '0.22.1'  // Specify version for consistency
+        KUBEAUDIT_VERSION = '0.22.1'
     }
     
     stages {
         stage('Install Kubeaudit') {
             steps {
                 script {
-                    // Check if kubeaudit is already installed
                     def kubeauditExists = sh(script: 'command -v kubeaudit', returnStatus: true) == 0
                     
                     if (!kubeauditExists) {
@@ -36,15 +33,19 @@ pipeline {
             }
         }
         
-        stage('Run Kubeaudit Scan on Cluster') {
+        stage('Run Kubeaudit Scan') {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'k8-cred', variable: 'KUBECONFIG_FILE')]) {
-                        // Option 1: Scan live cluster resources
                         sh """
                             export KUBECONFIG=${KUBECONFIG_FILE}
+                            export PATH=\$PATH:${WORKSPACE}
                             
-                            # Scan all resources in the namespace
+                            echo "=== Starting Kubeaudit Scan ==="
+                            echo "Namespace: ${env.K8S_NAMESPACE}"
+                            echo "Kubeconfig: \${KUBECONFIG}"
+                            
+                            # Run kubeaudit scan
                             kubeaudit all \
                                 --kubeconfig \${KUBECONFIG} \
                                 --namespace ${env.K8S_NAMESPACE} \
@@ -53,99 +54,61 @@ pipeline {
                             echo "=== Kubeaudit Scan Results ===" 
                             cat kubeaudit-report.txt
                         """
-                    }
-                }
-            }
-        }
-        
-        stage('Run Kubeaudit Scan on Manifests') {
-            when {
-                expression { 
-                    // Run this stage if there are manifest files in the repo
-                    fileExists('*.yaml') || fileExists('*.yml') || fileExists('k8s/')
-                }
-            }
-            steps {
-                script {
-                    // Option 2: Scan manifest files in the repository
-                    sh """
-                        # Scan all YAML manifests in the repository
-                        if [ -d "k8s" ]; then
-                            kubeaudit all -f k8s/ --format pretty >> kubeaudit-manifest-report.txt 2>&1 || true
-                        else
-                            find . -name "*.yaml" -o -name "*.yml" | while read file; do
-                                echo "Scanning \$file..." >> kubeaudit-manifest-report.txt
-                                kubeaudit all -f "\$file" --format pretty >> kubeaudit-manifest-report.txt 2>&1 || true
-                            done
-                        fi
                         
-                        if [ -f kubeaudit-manifest-report.txt ]; then
-                            echo "=== Manifest Scan Results ==="
-                            cat kubeaudit-manifest-report.txt
-                        fi
-                    """
-                }
-            }
-        }
-        
-        stage('Analyze Results') {
-            steps {
-                script {
-                    // Check if there are any security issues
-                    def clusterIssues = sh(
-                        script: 'grep -i "error\\|warn\\|fail" kubeaudit-report.txt || true',
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (clusterIssues) {
-                        echo "⚠️ Security issues found in cluster scan!"
-                        echo "${clusterIssues}"
-                        // Uncomment the next line to fail the pipeline on issues
-                        // error("Kubeaudit found security issues")
-                    } else {
-                        echo "✅ No critical issues found in cluster scan"
+                        // Analyze results
+                        def issuesFound = sh(
+                            script: 'grep -c "Error\\|Warning" kubeaudit-report.txt || echo 0',
+                            returnStdout: true
+                        ).trim().toInteger()
+                        
+                        if (issuesFound > 0) {
+                            echo "⚠️ Found ${issuesFound} security issues"
+                            unstable(message: "Kubeaudit found ${issuesFound} security issues")
+                        } else {
+                            echo "✅ No security issues found"
+                        }
                     }
                 }
             }
         }
         
-        stage('Archive Kubeaudit Reports') {
+        stage('Archive Report') {
             steps {
-                // Archive all reports
-                archiveArtifacts artifacts: 'kubeaudit*.txt', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'kubeaudit-report.txt', allowEmptyArchive: false
                 
-                // Optional: Publish as HTML report
-                script {
-                    if (fileExists('kubeaudit-report.txt')) {
-                        sh """
-                            echo '<html><body><pre>' > kubeaudit-report.html
-                            cat kubeaudit-report.txt >> kubeaudit-report.html
-                            echo '</pre></body></html>' >> kubeaudit-report.html
-                        """
-                        publishHTML([
-                            allowMissing: true,
-                            alwaysLinkToLastBuild: true,
-                            keepAll: true,
-                            reportDir: '.',
-                            reportFiles: 'kubeaudit-report.html',
-                            reportName: 'Kubeaudit Security Report'
-                        ])
-                    }
-                }
+                // Generate HTML report
+                sh """
+                    echo '<!DOCTYPE html><html><head><title>Kubeaudit Report</title>' > kubeaudit-report.html
+                    echo '<style>body{font-family:monospace;background:#1e1e1e;color:#d4d4d4;padding:20px;}pre{white-space:pre-wrap;}</style>' >> kubeaudit-report.html
+                    echo '</head><body><h1>Kubeaudit Security Scan Report</h1><pre>' >> kubeaudit-report.html
+                    cat kubeaudit-report.txt >> kubeaudit-report.html
+                    echo '</pre></body></html>' >> kubeaudit-report.html
+                """
+                
+                publishHTML([
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: '.',
+                    reportFiles: 'kubeaudit-report.html',
+                    reportName: 'Kubeaudit Security Report'
+                ])
             }
         }
     }
     
     post {
         always {
-            // Clean up
             sh 'rm -f kubeaudit_*.tar.gz'
         }
         success {
-            echo '✅ Kubeaudit Scan completed successfully!'
+            echo '✅ Kubeaudit scan completed successfully!'
         }
         failure {
-            echo '❌ Kubeaudit Scan failed!'
+            echo '❌ Pipeline failed!'
+        }
+        unstable {
+            echo '⚠️ Security issues detected - review the report'
         }
     }
 }
