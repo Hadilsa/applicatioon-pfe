@@ -127,9 +127,7 @@ pipeline {
                     if (issueCount > 0) {
                         echo "⚠️ Security issues found: ${issueCount} errors/warnings"
                         echo "${clusterIssues}"
-                        unstable(message: "Kubeaudit found ${issueCount} security issues")
-                        // Uncomment the next line to fail the pipeline on issues
-                        // error("Kubeaudit found security issues")
+                        error("Kubeaudit found ${issueCount} security issues - Build failed!")
                     } else {
                         echo "✅ No critical issues found in cluster scan"
                     }
